@@ -1,0 +1,115 @@
+name: CI/CD Pipeline
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  # PR Metrics Comparison (runs on PR)
+  pr-metrics:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Checkout PR-Report
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ secrets.PR_REPORT_REPO || 'your-org/PR-Report' }}
+          path: PR-Report
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: PR-Report/package-lock.json
+      
+      - name: Install PR-Report dependencies
+        working-directory: PR-Report
+        run: npm ci
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      
+      - name: Run PR Metrics Comparison
+        working-directory: PR-Report
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          REPO_PATH: ${{ github.workspace }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          STACK_PREFIX: ${{ secrets.STACK_PREFIX || 'dev' }}
+        run: node src/index.js
+
+  # Deploy to AWS (runs on merge to master)
+  deploy:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        run: npm install
+      
+      - name: Install Serverless Framework
+        run: npm install -g serverless
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+      
+      - name: Deploy to AWS
+        env:
+          STAGE: ${{ secrets.STACK_PREFIX || 'dev' }}
+        run: |
+          serverless deploy --stage $STAGE --verbose
+      
+      - name: Get API Gateway URL
+        id: api-url
+        run: |
+          API_URL=$(serverless info --stage ${{ secrets.STACK_PREFIX || 'dev' }} | grep -oP 'https://[^\s]+' | head -1 || echo "Deployed successfully")
+          echo "url=$API_URL" >> $GITHUB_OUTPUT
+          echo "API Gateway URL: $API_URL"
+      
+      - name: Create deployment summary
+        uses: actions/github-script@v6
+        with:
+          script: |
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: `🚀 **Deployed to AWS successfully!**\n\n✅ Stage: ${{ secrets.STACK_PREFIX || 'dev' }}\n🔗 API Gateway URL: ${{ steps.api-url.outputs.url }}\n\nDeployed at: ${new Date().toISOString()}`
+            })
+
