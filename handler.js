@@ -31,6 +31,7 @@ const TABLE_NAME = process.env.TABLE_NAME || 'poc-api-gateway-items';
  * Returns various response types with random execution times for testing metrics
  */
 exports.getItems = async (event) => {
+  // test change
   console.log('GET /items - Request:', JSON.stringify(event, null, 2));
   
   // Generate random scenario for testing different metrics
