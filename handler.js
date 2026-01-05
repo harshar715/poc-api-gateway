@@ -31,6 +31,7 @@ const TABLE_NAME = process.env.TABLE_NAME || 'poc-api-gateway-items';
  * Returns various response types with random execution times for testing metrics
  */
 exports.getItems = async (event) => {
+  // test change
   console.log('GET /items - Request:', JSON.stringify(event, null, 2));
   
   // Generate random scenario for testing different metrics
@@ -68,7 +69,8 @@ exports.getItems = async (event) => {
     
     if (scenario === 'server_error') {
       // 5xx error - Internal Server Error
-      // Throw exception to generate Lambda Error metric AND API Gateway 5XXError
+      // Throw exception WITHOUT catching it so Lambda counts it as an error
+      // This will also generate API Gateway 5XXError metric
       throw new Error('Simulated server error for testing');
     }
     
@@ -94,7 +96,16 @@ exports.getItems = async (event) => {
       })
     };
   } catch (error) {
+    // Only catch unexpected errors (not simulated server errors)
+    // If it's a simulated server error, it should have been thrown above
+    // For other errors (like DynamoDB errors), return 500 but Lambda won't count it
     console.error('Error getting items:', error);
+    
+    // If this is a simulated server error, re-throw it so Lambda counts it
+    if (error.message && error.message.includes('Simulated server error')) {
+      throw error;
+    }
+    
     return {
       statusCode: 500,
       headers: {
@@ -156,6 +167,8 @@ exports.createItem = async (event) => {
     
     // Simulate server errors (5xx)
     if (scenario === 'server_error') {
+      // Throw exception WITHOUT catching it so Lambda counts it as an error
+      // This will also generate API Gateway 5XXError metric
       throw new Error('Simulated server error for testing');
     }
     
