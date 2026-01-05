@@ -1,6 +1,6 @@
 service: api-gateway-sample-app
 
-frameworkVersion: '>=3.0.0'
+frameworkVersion: '3'
 
 provider:
   name: aws
